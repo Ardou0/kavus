@@ -1,0 +1,9 @@
+{
+  "tray_show_label": "Show Application",
+  "tray_exit_label": "Exit",
+  "log_mcp_start": "Starting local MCP Server process...",
+  "log_mcp_error": "MCP server encountered an error",
+  "log_mcp_starting_on_port": "Starting MCP server on {}",
+  "greet_template": "Hello, {}! You've been greeted from Rust!",
+  "log_vue_ready": "Vue.js is ready, opening the interface!"
+}

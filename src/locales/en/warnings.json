@@ -1,0 +1,4 @@
+{
+  "sandboxTitle": "PROJECT SANDBOX DATA",
+  "sandboxDesc": "Creating or registering in a folder will generate a hidden .kavus/ directory at the root. All execution data and configurations for this project will be stored there in an isolated manner."
+}

@@ -1,0 +1,13 @@
+{
+  "title": "SYSTEM CONFIGURATION",
+  "subtitle": "Manage local app configurations, shortcuts, and log parameters.",
+  "generalTitle": "General Configuration",
+  "startMinimized": "Start Minimized to Tray",
+  "startMinimizedDesc": "Hide window and launch into system tray on OS startup.",
+  "logLevel": "Rust Log Level",
+  "logLevelDesc": "Configure log verbosity printed to console.",
+  "theme": "Interface Theme",
+  "themeDesc": "Select interface visual theme mode.",
+  "btnSave": "Save Configuration",
+  "saving": "Saving..."
+}

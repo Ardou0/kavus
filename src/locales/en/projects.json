@@ -1,0 +1,18 @@
+{
+  "title": "WORKSPACE & PROJECTS MANAGER",
+  "subtitle": "Register local directories as projects, switch active workspaces, and create new sandbox environments.",
+  "registerTitle": "Register New Project",
+  "listTitle": "Registered Workspaces",
+  "projectName": "Project Name",
+  "projectNamePlaceholder": "e.g. My Sandbox Project",
+  "directoryPath": "Directory Path",
+  "directoryPathPlaceholder": "e.g. /home/user/kavus-projects/sandbox",
+  "directoryNote": "Note: Folder structure will be created automatically if missing.",
+  "submitRegister": "Register Project",
+  "submittingRegister": "Registering...",
+  "noProjects": "No projects registered. Use the left panel to register your first workspace.",
+  "activeBadge": "Active",
+  "btnOpen": "Open",
+  "btnRemove": "Remove",
+  "removeTooltip": "Unregister project"
+}

@@ -1,0 +1,11 @@
+{
+  "appName": "KAVUS",
+  "systemReady": "SYSTEM READY",
+  "systemActive": "SYSTEM ACTIVE",
+  "confirm": "Confirm",
+  "cancel": "Cancel",
+  "ok": "OK",
+  "warning": "Warning",
+  "error": "Error",
+  "info": "Information"
+}
