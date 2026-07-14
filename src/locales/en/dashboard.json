@@ -1,0 +1,13 @@
+{
+  "title": "AI ORCHESTRATION HUD",
+  "subtitle": "Real-time telemetry and server controls for the Kavus AI agent environment.",
+  "cpuTitle": "Node Core CPU",
+  "memTitle": "Memory Heap",
+  "agentsTitle": "Active Agents",
+  "agentsOnline": "Online",
+  "ipcTitle": "IPC Verification (Rust Interop)",
+  "ipcDesc": "Enter a name below to trigger a Tauri command invocation and fetch a personalized response from the Rust backend.",
+  "inputPlaceholder": "Enter agent / client name...",
+  "btnInvoke": "Invoke Greet",
+  "response": "Response"
+}

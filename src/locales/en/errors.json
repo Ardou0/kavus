@@ -1,0 +1,5 @@
+{
+  "projectNameRequired": "Project name is required",
+  "directoryPathRequired": "Directory path is required",
+  "failedRegister": "Failed to register project"
+}
