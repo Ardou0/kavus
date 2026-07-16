@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDownloadStore } from '../../stores/downloadStore';
+import { useModalStore } from '../../stores/modalStore';
 import { appService } from '../../services/appService';
 
 withDefaults(
@@ -14,11 +16,22 @@ withDefaults(
 );
 
 const projectStore = useProjectStore();
+const downloadStore = useDownloadStore();
+const modalStore = useModalStore();
 const router = useRouter();
 
 const minimize = () => appService.minimizeWindow();
 const toggleMaximize = () => appService.toggleMaximizeWindow();
-const close = () => appService.closeWindow();
+const close = async () => {
+  if (downloadStore.activeDownload) {
+    const confirmed = await modalStore.confirm(
+      'A model download is currently in progress.\nAre you sure you want to abort the download and close the application?',
+      'Abort Download & Exit'
+    );
+    if (!confirmed) return;
+  }
+  appService.closeWindow();
+};
 
 const dropdownOpen = ref(false);
 let lastClickTime = 0;

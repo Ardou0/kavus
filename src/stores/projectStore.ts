@@ -102,7 +102,8 @@ export const useProjectStore = defineStore('projects', () => {
     try {
       await invoke('create_project_directory', { path });
       if (currentProject.value) {
-        const parentPath = path.substring(0, path.lastIndexOf('/'));
+        const lastSeparator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        const parentPath = lastSeparator !== -1 ? path.substring(0, lastSeparator) : '';
         await loadFileTree(parentPath || currentProject.value.path);
       }
     } catch (err) {
@@ -115,7 +116,8 @@ export const useProjectStore = defineStore('projects', () => {
     try {
       await invoke('create_project_file', { path, content });
       if (currentProject.value) {
-        const parentPath = path.substring(0, path.lastIndexOf('/'));
+        const lastSeparator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        const parentPath = lastSeparator !== -1 ? path.substring(0, lastSeparator) : '';
         await loadFileTree(parentPath || currentProject.value.path);
       }
     } catch (err) {
@@ -128,7 +130,8 @@ export const useProjectStore = defineStore('projects', () => {
     try {
       await invoke('delete_project_item', { path });
       if (currentProject.value) {
-        const parentPath = path.substring(0, path.lastIndexOf('/'));
+        const lastSeparator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        const parentPath = lastSeparator !== -1 ? path.substring(0, lastSeparator) : '';
         await loadFileTree(parentPath || currentProject.value.path);
       }
     } catch (err) {
