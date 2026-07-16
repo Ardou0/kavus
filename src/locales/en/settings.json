@@ -9,5 +9,6 @@
   "theme": "Interface Theme",
   "themeDesc": "Select interface visual theme mode.",
   "btnSave": "Save Configuration",
-  "saving": "Saving..."
+  "saving": "Saving...",
+  "advancedTitle": "Advanced & Developer Settings"
 }

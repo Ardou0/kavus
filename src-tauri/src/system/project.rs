@@ -30,6 +30,7 @@ pub struct FileSystemItem {
 }
 
 /// ProjectManager handles the project index and filesystem CRUD operations.
+#[derive(Clone)]
 pub struct ProjectManager {
     config_dir: PathBuf,
     index_file: PathBuf,
@@ -256,6 +257,7 @@ fn uuid_v4_placeholder() -> String {
 mod tests {
     use super::*;
 
+    /// Asserts that our simple mock UUID implementation yields unique, non-empty identifiers for project indexing.
     #[test]
     fn test_uuid_generation() {
         let id1 = uuid_v4_placeholder();

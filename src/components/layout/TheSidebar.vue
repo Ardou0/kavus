@@ -3,9 +3,13 @@ import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import SidebarButton from '../base/SidebarButton.vue';
 import { appService } from '../../services/appService';
+import { useDownloadStore } from '../../stores/downloadStore';
+import { useModalStore } from '../../stores/modalStore';
 
 const route = useRoute();
 const router = useRouter();
+const downloadStore = useDownloadStore();
+const modalStore = useModalStore();
 
 const activeView = computed(() => (route.name as string) || 'dashboard');
 
@@ -14,6 +18,13 @@ const navigateTo = (viewName: string) => {
 };
 
 const triggerExit = async () => {
+  if (downloadStore.activeDownload) {
+    const confirmed = await modalStore.confirm(
+      'A model download is currently in progress.\nAre you sure you want to abort the download and exit the application?',
+      'Abort Download & Exit'
+    );
+    if (!confirmed) return;
+  }
   await appService.exit();
 };
 </script>
@@ -37,7 +48,7 @@ const triggerExit = async () => {
     </div>
 
     <!-- Bottom Section (Flows upwards) -->
-    <div class="flex flex-col items-center gap-1.5">
+    <div class="flex flex-col items-center gap-1.5 border-t pt-2 border-outline-variant">
       <!-- Settings -->
       <SidebarButton
         :active="activeView === 'settings'"

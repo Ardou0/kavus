@@ -1,117 +1,184 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { useSettingsStore } from '../stores/settingsStore';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { t } from '../i18n';
+import GeneralSettings from '../components/settings/GeneralSettings.vue';
+import WorkspaceSettings from '../components/settings/WorkspaceSettings.vue';
+import AutocorrectionSettings from '../components/settings/AutocorrectionSettings.vue';
+import DownloadSettings from '../components/settings/DownloadSettings.vue';
+import AdvancedSettings from '../components/settings/AdvancedSettings.vue';
+import AboutSettings from '../components/settings/AboutSettings.vue';
 
-const settingsStore = useSettingsStore();
+const route = useRoute();
 
-// Local form bindings initialized to store settings
-const startMinimized = ref(settingsStore.settings.start_minimized);
-const logLevel = ref(settingsStore.settings.log_level);
-const theme = ref(settingsStore.settings.theme);
+const sections = ref([
+  { id: 'general', label: 'General' },
+  { id: 'workspace', label: 'Workspaces' },
+  { id: 'autocorrection', label: 'Autocorrection' },
+  { id: 'downloads', label: 'Downloads' },
+  { id: 'advanced', label: 'Advanced' },
+  { id: 'about', label: 'About' },
+]);
 
-// Keep form synchronized if store updates (e.g. once async boot load finishes)
+const activeTab = ref(
+  route.query.tab && typeof route.query.tab === 'string' ? route.query.tab : 'general'
+);
+const layoutMode = ref<'auto' | 'horizontal' | 'vertical'>('auto');
+const windowWidth = ref(window.innerWidth);
+
+const activeComponent = computed(() => {
+  switch (activeTab.value) {
+    case 'general': return GeneralSettings;
+    case 'workspace': return WorkspaceSettings;
+    case 'autocorrection': return AutocorrectionSettings;
+    case 'downloads': return DownloadSettings;
+    case 'advanced': return AdvancedSettings;
+    case 'about': return AboutSettings;
+    default: return GeneralSettings;
+  }
+});
+
+const isVertical = computed(() => {
+  if (layoutMode.value === 'horizontal') return false;
+  if (layoutMode.value === 'vertical') return true;
+  return windowWidth.value < 768 || sections.value.length > 6;
+});
+
+// Horizontal Sliding Pill Position tracking
+const navContainerRef = ref<HTMLElement | null>(null);
+const activePillStyle = ref({ left: '0px', width: '0px' });
+
+const updateActivePill = () => {
+  if (isVertical.value || !navContainerRef.value) return;
+  const activeBtn = navContainerRef.value.querySelector(`button[data-tab="${activeTab.value}"]`) as HTMLElement;
+  if (activeBtn) {
+    activePillStyle.value = {
+      left: `${activeBtn.offsetLeft}px`,
+      width: `${activeBtn.offsetWidth}px`,
+    };
+  }
+};
+
+watch([activeTab, isVertical], () => {
+  nextTick(updateActivePill);
+});
+
+const handleResize = () => {
+  windowWidth.value = window.innerWidth;
+  updateActivePill();
+};
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize);
+  // Deep-link directly to specified tab from route query parameters on mount
+  if (route.query.tab && typeof route.query.tab === 'string') {
+    activeTab.value = route.query.tab;
+  }
+  nextTick(updateActivePill);
+});
+
+// Reactively switch tabs when the URL query parameters update (e.g. via footer deep links)
 watch(
-  () => settingsStore.settings,
-  (newVal) => {
-    startMinimized.value = newVal.start_minimized;
-    logLevel.value = newVal.log_level;
-    theme.value = newVal.theme;
-  },
-  { deep: true }
+  () => route.query.tab,
+  (newTab) => {
+    if (newTab && typeof newTab === 'string') {
+      activeTab.value = newTab;
+    }
+  }
 );
 
-const handleSaveSettings = async () => {
-  try {
-    await settingsStore.saveSettings({
-      start_minimized: startMinimized.value,
-      log_level: logLevel.value,
-      theme: theme.value,
-    });
-  } catch (err) {
-    console.error('Failed to save settings:', err);
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize);
+});
+
+const toggleLayout = () => {
+  if (layoutMode.value === 'auto') {
+    layoutMode.value = 'horizontal';
+  } else if (layoutMode.value === 'horizontal') {
+    layoutMode.value = 'vertical';
+  } else {
+    layoutMode.value = 'auto';
   }
 };
 </script>
 
 <template>
-  <div class="flex-1 p-4 overflow-y-auto space-y-4 bg-background">
-    <!-- Header -->
-    <div class="border-b border-outline-variant pb-2">
-      <h2 class="text-ui-header text-lg text-primary tracking-tight font-semibold">
-        {{ t.settings.title }}
-      </h2>
-      <p class="text-ui-body text-xs text-on-surface-variant">
-        {{ t.settings.subtitle }}
-      </p>
-    </div>
-
-    <!-- Settings Form -->
-    <div class="max-w-2xl bg-surface-container border border-outline-variant p-5 rounded-md space-y-4">
-      <h3 class="text-ui-header text-sm text-primary font-medium border-b border-outline-variant pb-1.5">
-        {{ t.settings.generalTitle }}
-      </h3>
-
-      <div class="space-y-4">
-        <!-- Toggle: Start Minimized -->
-        <div class="flex items-center justify-between">
-          <div class="space-y-0.5">
-            <div class="text-xs text-on-surface font-semibold">{{ t.settings.startMinimized }}</div>
-            <div class="text-[11px] text-on-surface-variant">{{ t.settings.startMinimizedDesc }}</div>
-          </div>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" v-model="startMinimized" :disabled="settingsStore.isLoading" class="sr-only peer">
-            <div class="w-9 h-5 bg-surface-dim peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface-variant after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:after:bg-on-primary"></div>
-          </label>
+  <div class="flex-1 p-4 overflow-y-auto space-y-5 bg-background flex flex-col items-center">
+    <div class="w-full max-w-3xl space-y-5">
+      <!-- Header -->
+      <div class="border-b border-outline-variant pb-2 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 class="text-ui-header text-lg text-primary tracking-tight font-semibold">
+            {{ t.settings.title }}
+          </h2>
+          <p class="text-ui-body text-xs text-on-surface-variant">
+            {{ t.settings.subtitle }}
+          </p>
         </div>
 
-        <hr class="border-outline-variant" />
+        <!-- Layout toggle button -->
+        <button
+          @click="toggleLayout"
+          class="bg-surface hover:bg-surface-container border border-outline-variant hover:border-outline text-on-surface-variant hover:text-white text-xs font-semibold px-2.5 py-1.5 rounded transition-all cursor-pointer font-mono outline-none flex items-center gap-1.5"
+          title="Cycle Layout Mode (Auto / Horizontal / Vertical)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3.5 h-3.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+          </svg>
+          Layout: {{ layoutMode.toUpperCase() }}
+        </button>
+      </div>
 
-        <!-- Select: Log Level -->
-        <div class="flex items-center justify-between">
-          <div class="space-y-0.5">
-            <div class="text-xs text-on-surface font-semibold">{{ t.settings.logLevel }}</div>
-            <div class="text-[11px] text-on-surface-variant">{{ t.settings.logLevelDesc }}</div>
-          </div>
-          <select
-            v-model="logLevel"
-            :disabled="settingsStore.isLoading"
-            class="bg-surface-dim border border-outline-variant rounded px-2.5 py-1 text-xs text-on-surface font-mono outline-none focus:border-primary transition-colors cursor-pointer disabled:opacity-50"
+      <!-- Navigation Tab Bar (Horizontal Mode) -->
+      <div v-if="!isVertical" class="flex justify-center">
+        <div
+          ref="navContainerRef"
+          class="relative flex p-1 bg-surface-dim border border-outline-variant rounded-md w-fit items-center"
+        >
+          <!-- Sliding White Pill Background -->
+          <div
+            class="absolute top-1 bottom-1 rounded bg-primary transition-all duration-200 ease-out shadow-md"
+            :style="{ left: activePillStyle.left, width: activePillStyle.width }"
+          ></div>
+
+          <!-- Section Buttons -->
+          <button
+            v-for="sec in sections"
+            :key="sec.id"
+            :data-tab="sec.id"
+            @click="activeTab = sec.id"
+            class="relative z-10 px-4 py-1.5 text-xs font-semibold font-mono uppercase tracking-wider rounded transition-colors duration-150 outline-none cursor-pointer"
+            :class="activeTab === sec.id ? 'text-on-primary font-bold' : 'text-on-surface-variant hover:text-on-surface'"
           >
-            <option value="debug">DEBUG</option>
-            <option value="info">INFO</option>
-            <option value="warn">WARNING</option>
-            <option value="error">ERROR</option>
-          </select>
-        </div>
-
-        <hr class="border-outline-variant" />
-
-        <!-- Select: Theme -->
-        <div class="flex items-center justify-between">
-          <div class="space-y-0.5">
-            <div class="text-xs text-on-surface font-semibold">{{ t.settings.theme }}</div>
-            <div class="text-[11px] text-on-surface-variant">{{ t.settings.themeDesc }}</div>
-          </div>
-          <select
-            v-model="theme"
-            :disabled="settingsStore.isLoading"
-            class="bg-surface-dim border border-outline-variant rounded px-2.5 py-1 text-xs text-on-surface font-mono outline-none focus:border-primary transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <option value="dark">KAVUS DARK (Slate/Carbon)</option>
-            <option value="light">LIGHT MODE (Classic)</option>
-          </select>
+            {{ sec.label }}
+          </button>
         </div>
       </div>
 
-      <div class="flex justify-end pt-2">
-        <button
-          @click="handleSaveSettings"
-          :disabled="settingsStore.isLoading"
-          class="bg-primary hover:bg-secondary text-on-primary text-xs font-semibold px-4 py-2 rounded transition-all cursor-pointer font-mono disabled:opacity-50"
+      <!-- Settings Content Workspace -->
+      <div :class="isVertical ? 'flex flex-col md:flex-row gap-5 justify-center items-start' : 'w-full flex justify-center'">
+        <!-- Sidebar Navigation (Vertical Mode) -->
+        <div
+          v-if="isVertical"
+          class="flex flex-col gap-1 w-full md:w-48 bg-surface-container border border-outline-variant p-1.5 rounded-md h-fit shrink-0"
         >
-          {{ settingsStore.isLoading ? t.settings.saving : t.settings.btnSave }}
-        </button>
+          <button
+            v-for="sec in sections"
+            :key="sec.id"
+            @click="activeTab = sec.id"
+            class="text-left px-3 py-2 text-[11px] font-mono uppercase tracking-wider rounded transition-all outline-none cursor-pointer"
+            :class="activeTab === sec.id ? 'bg-primary text-on-primary font-bold' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-dim'"
+          >
+            {{ sec.label }}
+          </button>
+        </div>
+
+        <!-- Active Content Card -->
+        <div class="flex-1 w-full max-w-2xl">
+          <KeepAlive>
+            <component :is="activeComponent" />
+          </KeepAlive>
+        </div>
       </div>
     </div>
   </div>
