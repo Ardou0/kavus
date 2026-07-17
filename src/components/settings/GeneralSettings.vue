@@ -4,7 +4,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { t } from '../../i18n';
 import BaseCard from '../base/BaseCard.vue';
 import BaseSelect from '../inputs/BaseSelect.vue';
-import BaseToggle from '../inputs/BaseToggle.vue';
+import BaseInput from '../inputs/BaseInput.vue';
 
 const settingsStore = useSettingsStore();
 
@@ -46,8 +46,9 @@ const handleSave = async () => {
           <div class="text-xs text-on-surface font-semibold">{{ t.settings.startMinimized }}</div>
           <div class="text-[11px] text-on-surface-variant">{{ t.settings.startMinimizedDesc }}</div>
         </div>
-        <BaseToggle
+        <BaseInput
           v-model="startMinimized"
+          type="checkbox"
           @change="handleSave"
           :disabled="settingsStore.isLoading"
         />

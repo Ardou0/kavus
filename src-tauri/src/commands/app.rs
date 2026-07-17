@@ -44,15 +44,17 @@ pub struct HardwareProfile {
     pub total_ram_gb: f32,
     pub has_gpu: bool,
     pub recommended_model: String,
+    pub executable_models: Vec<String>,
     pub cpu_cores: usize,
+    pub is_server_running: bool,
 }
 
 /// Evaluates host RAM, CPU cores, and GPU capacity to determine the best local LLM size.
-/// For Apple Silicon, unified memory sizes allow heavier models; Windows/Linux systems with
-/// dedicated GPUs target high-fidelity 8-bit quantized models that fit fully in VRAM.
+/// Evaluates dynamically against requirements loaded from models.json.
 #[tauri::command]
-pub async fn check_hardware_performance() -> HardwareProfile {
+pub async fn check_hardware_performance(app_handle: tauri::AppHandle) -> HardwareProfile {
     use sysinfo::System;
+    use tauri::Manager;
     let mut sys = System::new_all();
     sys.refresh_memory();
     let total_ram_gb = (sys.total_memory() as f32) / 1024.0 / 1024.0 / 1024.0;
@@ -61,38 +63,171 @@ pub async fn check_hardware_performance() -> HardwareProfile {
     let gpu_names = get_gpu_names().await;
     let has_gpu = !gpu_names.is_empty();
 
-    let recommended_model = if has_gpu {
-        #[cfg(target_os = "macos")]
+    let is_server_running = if let Some(server_manager) = app_handle.try_state::<crate::system::llama::LlamaServerManager>() {
+        server_manager.is_running()
+    } else {
+        false
+    };
+
+    // Read models.json
+    let models_json_str = include_str!("../../models.json");
+    let mut executable_models = Vec::new();
+    let mut recommended_model = "qwen-1.5b".to_string(); // fallback default
+    let mut best_score = -1.0;
+
+    // Detect GPU VRAM to ensure large models fit in VRAM
+    let mut total_vram_gb: f32 = 0.0;
+    
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = tokio::process::Command::new("powershell")
+            .args(&["-NoProfile", "-Command", "Get-ItemProperty -Path 'HKLM:\\SYSTEM\\ControlSet001\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' -ErrorAction SilentlyContinue | Where-Object { $_.'HardwareInformation.qwMemorySize' } | Select-Object -ExpandProperty 'HardwareInformation.qwMemorySize'"])
+            .output()
+            .await
         {
-            if total_ram_gb >= 30.0 {
-                "qwen-32b".to_string()
-            } else if total_ram_gb >= 15.0 {
-                "llama3.1-8b".to_string()
-            } else {
-                "qwen-3b".to_string()
+            let s = String::from_utf8_lossy(&output.stdout);
+            let mut max_bytes: u64 = 0;
+            for line in s.lines() {
+                if let Ok(bytes) = line.trim().parse::<u64>() {
+                    if bytes > max_bytes {
+                        max_bytes = bytes;
+                    }
+                }
+            }
+            if max_bytes > 0 {
+                total_vram_gb = (max_bytes as f32) / 1024.0 / 1024.0 / 1024.0;
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        {
-            // Dedicated GPU system (Nvidia/Vulkan)
-            "qwen-7b-q8".to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Apple Silicon uses Unified Memory where VRAM = System RAM
+        total_vram_gb = total_ram_gb;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try reading sysfs files (e.g. amdgpu)
+        if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
+            let mut max_bytes: u64 = 0;
+            for entry in entries.flatten() {
+                let path = entry.path().join("device").join("mem_info_vram_total");
+                if path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        if let Ok(bytes) = content.trim().parse::<u64>() {
+                            if bytes > max_bytes {
+                                max_bytes = bytes;
+                            }
+                        }
+                    }
+                }
+            }
+            if max_bytes > 0 {
+                total_vram_gb = (max_bytes as f32) / 1024.0 / 1024.0 / 1024.0;
+            }
         }
-    } else {
-        // CPU-only system
-        if total_ram_gb >= 30.0 {
-            "llama3.1-8b".to_string()
-        } else if total_ram_gb >= 15.0 {
-            "qwen-3b".to_string()
-        } else {
-            "qwen-1.5b".to_string()
+        
+        // Fallback or override for NVIDIA using nvidia-smi if installed
+        if total_vram_gb < 1.0 {
+            if let Ok(output) = tokio::process::Command::new("nvidia-smi")
+                .args(&["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+                .output()
+                .await
+            {
+                let s = String::from_utf8_lossy(&output.stdout);
+                if let Some(line) = s.lines().next() {
+                    if let Ok(mb) = line.trim().parse::<f32>() {
+                        total_vram_gb = mb / 1024.0;
+                    }
+                }
+            }
         }
-    };
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LocalRequirements {
+        min_ram_gb: f32,
+        requires_gpu: bool,
+        recommended_gpu: bool,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LocalModelConfig {
+        id: String,
+        #[allow(dead_code)]
+        name: String,
+        size_bytes: u64,
+        requirements: LocalRequirements,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LocalModelsJson {
+        models: Vec<LocalModelConfig>,
+    }
+
+    if let Ok(data) = serde_json::from_str::<LocalModelsJson>(models_json_str) {
+        for model in data.models {
+            // Check GPU requirements
+            if model.requirements.requires_gpu && !has_gpu {
+                continue;
+            }
+
+            // Check RAM limits
+            if total_ram_gb < model.requirements.min_ram_gb {
+                continue;
+            }
+
+            // Estimate model memory footprint (size_bytes is in GGUF weight format, we add 2GB margin for Context/Prompt)
+            let estimated_memory_need_gb = (model.size_bytes as f32) / 1024.0 / 1024.0 / 1024.0 + 2.0;
+
+            // If user has GPU, check if the model would overflow dedicated VRAM, forcing slow swap/system memory fallback.
+            // On non-mac dedicated GPUs, if the model size + context overhead exceeds the VRAM, it's not a good fit.
+            #[cfg(not(target_os = "macos"))]
+            {
+                if has_gpu && total_vram_gb > 0.1 && estimated_memory_need_gb > total_vram_gb {
+                    // Reduce priority or skip if dedicated GPU offload is recommended but we don't have enough VRAM
+                    if model.requirements.requires_gpu || model.requirements.recommended_gpu {
+                        continue;
+                    }
+                }
+            }
+
+            // If we match, this model is executable
+            executable_models.push(model.id.clone());
+
+            // Score for recommendation
+            // We want the largest/best model that fits comfortably.
+            let mut score = model.requirements.min_ram_gb; // base score is min_ram_gb (larger models have higher scores)
+            
+            // Add a bonus if it matches GPU profile and fits completely in VRAM
+            if has_gpu && model.requirements.recommended_gpu {
+                if total_vram_gb >= estimated_memory_need_gb {
+                    score += 15.0; // High bonus for fully fitting in VRAM
+                } else {
+                    score -= 10.0; // Heavy penalty if it overflows VRAM (forces hybrid/swapping on PC)
+                }
+            }
+
+            // Do not recommend models that require more than 90% of our RAM if we are CPU-only
+            if !has_gpu && model.requirements.min_ram_gb > (total_ram_gb * 0.9) {
+                score -= 20.0;
+            }
+
+            if score > best_score {
+                best_score = score;
+                recommended_model = model.id;
+            }
+        }
+    }
 
     HardwareProfile {
         total_ram_gb,
         has_gpu,
         recommended_model,
+        executable_models,
         cpu_cores,
+        is_server_running,
     }
 }
 

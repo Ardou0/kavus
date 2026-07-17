@@ -34,15 +34,24 @@ struct LlamaBinaries {
     linux_aarch64: BinaryAsset,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 #[allow(dead_code)]
-struct ModelConfig {
-    id: String,
-    name: String,
-    size_bytes: u64,
-    url: String,
-    mirror_url: String,
-    sha256: String,
+pub struct ModelRequirements {
+    pub min_ram_gb: f32,
+    pub requires_gpu: bool,
+    pub recommended_gpu: bool,
+}
+
+#[derive(serde::Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct ModelConfig {
+    pub id: String,
+    pub name: String,
+    pub size_bytes: u64,
+    pub url: String,
+    pub mirror_url: String,
+    pub sha256: String,
+    pub requirements: ModelRequirements,
 }
 
 #[derive(serde::Deserialize)]
@@ -56,6 +65,7 @@ struct ModelsJson {
 const LLAMA_BIN_NAME: &str = "llama-cli.exe";
 #[cfg(not(target_os = "windows"))]
 const LLAMA_BIN_NAME: &str = "llama-cli";
+
 
 #[derive(serde::Serialize)]
 pub struct ModelInfoPayload {
