@@ -3,7 +3,7 @@ import { ref, watch } from 'vue';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useProjectStore } from '../../stores/projectStore';
 import BaseCard from '../base/BaseCard.vue';
-import BaseToggle from '../inputs/BaseToggle.vue';
+import BaseInput from '../inputs/BaseInput.vue';
 
 const settingsStore = useSettingsStore();
 const projectStore = useProjectStore();
@@ -48,21 +48,21 @@ const handlePickFolder = async () => {
       <div class="flex flex-col gap-1.5">
         <div class="text-xs text-on-surface font-semibold">Default Projects Directory</div>
         <div class="text-[11px] text-on-surface-variant mb-1">Standard root path pre-selected when creating new workspaces.</div>
-        <div class="flex gap-1.5">
-          <input
+        <div class="flex gap-1.5 items-center">
+          <BaseInput
             v-model="defaultPath"
             type="text"
             placeholder="/home/user/projects"
             @change="handleSave"
             @keyup.enter="handleSave"
             :disabled="settingsStore.isLoading"
-            class="flex-1 bg-surface-dim border border-outline-variant rounded px-3 py-1.5 text-xs text-on-surface outline-none focus:border-primary transition-colors font-mono disabled:opacity-50"
+            class="flex-1"
           />
           <button
             type="button"
             @click="handlePickFolder"
             :disabled="settingsStore.isLoading"
-            class="bg-surface hover:bg-surface-container border border-outline-variant hover:border-outline text-on-surface text-xs font-semibold px-3 rounded transition-all cursor-pointer flex items-center justify-center outline-none"
+            class="bg-surface hover:bg-surface-container border border-outline-variant hover:border-outline text-on-surface text-xs font-semibold px-3 py-1.5 rounded transition-all cursor-pointer flex items-center justify-center outline-none"
             title="Browse Directory"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
@@ -80,8 +80,9 @@ const handlePickFolder = async () => {
           <div class="text-xs text-on-surface font-semibold">Show Sandbox Warning Banner</div>
           <div class="text-[11px] text-on-surface-variant">Display details about the hidden .kavus/ folders on registration.</div>
         </div>
-        <BaseToggle
+        <BaseInput
           v-model="showWarning"
+          type="checkbox"
           @change="handleSave"
           :disabled="settingsStore.isLoading"
         />

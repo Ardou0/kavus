@@ -57,7 +57,7 @@ impl Default for AppSettings {
             default_project_path: "".to_string(),
             show_sandbox_warning: true,
             enable_autocorrection: false,
-            autocorrection_model: "llama3-8b".to_string(),
+            autocorrection_model: "llama3.1-8b".to_string(),
             cpu_threads: 4,
             gpu_layers: 0,
             context_size: 2048,

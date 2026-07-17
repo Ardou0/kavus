@@ -6,7 +6,7 @@ import { useModalStore } from '../../stores/modalStore';
 import { invoke } from '@tauri-apps/api/core';
 import BaseCard from '../base/BaseCard.vue';
 import BaseSelect from '../inputs/BaseSelect.vue';
-import BaseToggle from '../inputs/BaseToggle.vue';
+import BaseInput from '../inputs/BaseInput.vue';
 
 const settingsStore = useSettingsStore();
 const downloadStore = useDownloadStore();
@@ -31,36 +31,7 @@ const availableModels = ref<Array<{ id: string; name: string; size_bytes: number
 
 const cpuCoresMax = ref(8);
 
-const recommendedCpuThreads = computed(() => {
-  const half = Math.floor(cpuCoresMax.value / 2);
-  return Math.max(1, Math.min(half, 8));
-});
 
-const maxModelLayers = computed(() => {
-  switch (autocorrectionModel.value) {
-    case 'qwen-32b':
-      return 64;
-    case 'qwen-14b':
-    case 'qwen-14b-q3':
-      return 40;
-    case 'qwen-7b':
-    case 'qwen-7b-q8':
-      return 28;
-    case 'qwen-3b':
-      return 32;
-    case 'qwen-1.5b':
-      return 28;
-    case 'llama3-8b':
-    case 'llama3.1-8b':
-      return 32;
-    case 'llama3.2-3b':
-      return 28;
-    case 'deepseek-6.7b':
-      return 32;
-    default:
-      return 32;
-  }
-});
 
 const fetchDependenciesStatus = async () => {
   isCheckingDeps.value = true;
@@ -88,6 +59,20 @@ const handleInstallDependency = async (dep: any) => {
   }
 };
 
+const executableModelsList = ref<string[]>([]);
+const isServerRunning = ref(false);
+
+const checkActiveServerState = async () => {
+  try {
+    const profile = await invoke<{ is_server_running: boolean }>('check_hardware_performance');
+    isServerRunning.value = profile.is_server_running;
+  } catch (err) {
+    console.error('Failed to check active Llama server status:', err);
+  }
+};
+
+let serverStatePollTimer: any = null;
+
 onMounted(async () => {
   await downloadStore.loadHistory();
   await downloadStore.setupListener();
@@ -98,10 +83,12 @@ onMounted(async () => {
   }
   await fetchDependenciesStatus();
   try {
-    const profile = await invoke<{ total_ram_gb: number; has_gpu: boolean; recommended_model: string; cpu_cores: number }>('check_hardware_performance');
+    const profile = await invoke<{ total_ram_gb: number; has_gpu: boolean; recommended_model: string; executable_models: string[]; is_server_running: boolean; cpu_cores: number }>('check_hardware_performance');
     recommendedModel.value = profile.recommended_model;
     systemHasGpu.value = profile.has_gpu;
     totalRamGb.value = profile.total_ram_gb;
+    executableModelsList.value = profile.executable_models || [];
+    isServerRunning.value = profile.is_server_running;
     cpuCoresMax.value = profile.cpu_cores || 8;
     
     // Auto-detect and recommend default GPU layers if first run and GPU detected
@@ -118,10 +105,27 @@ onMounted(async () => {
   } catch (err) {
     console.error('Failed to retrieve GPU devices list:', err);
   }
+
+  // Poll server state every 3 seconds to keep UI up to date
+  serverStatePollTimer = setInterval(checkActiveServerState, 3000);
+});
+
+import { onUnmounted } from 'vue';
+onUnmounted(() => {
+  if (serverStatePollTimer) {
+    clearInterval(serverStatePollTimer);
+  }
 });
 
 const modelOptions = computed(() => {
-  const sorted = [...availableModels.value].sort((a, b) => a.size_bytes - b.size_bytes);
+  // Filter model options so only executable ones are shown
+  const filtered = availableModels.value.filter(m => {
+    // If executableModelsList is not populated yet (e.g. initial render), allow showing all
+    if (executableModelsList.value.length === 0) return true;
+    return executableModelsList.value.includes(m.id);
+  });
+  
+  const sorted = [...filtered].sort((a, b) => a.size_bytes - b.size_bytes);
   return sorted.map(m => {
     const gb = m.size_bytes / 1024 / 1024 / 1024;
     const label = `${m.name} - ${gb.toFixed(1)} GB${recommendedModel.value === m.id ? ' (Recommended)' : ''}`;
@@ -225,6 +229,13 @@ const handleSave = async () => {
   }
 };
 
+const triggerBlockedConfigAlert = async () => {
+  await modalStore.confirm(
+    "To modify the model, backend mode, or port, you must first turn off the 'Enable Auto-correction' toggle. Once your changes are saved, you can reactivate it.",
+    "Configuration Locked"
+  );
+};
+
 const handleToggleAutocorrection = async () => {
   if (enableAutocorrection.value && !isModelDownloaded.value) {
     enableAutocorrection.value = false;
@@ -235,9 +246,15 @@ const handleToggleAutocorrection = async () => {
     return;
   }
   await handleSave();
+  await checkActiveServerState();
 };
 
 const handleModelChange = async (value: string | number) => {
+  if (isServerRunning.value) {
+    await triggerBlockedConfigAlert();
+    autocorrectionModel.value = settingsStore.settings.autocorrection_model;
+    return;
+  }
   const newVal = String(value);
   autocorrectionModel.value = newVal;
   
@@ -282,8 +299,9 @@ const formatBytes = (bytes: number) => {
           <div class="text-xs text-on-surface font-semibold">Enable Auto-correction</div>
           <div class="text-[11px] text-on-surface-variant">Analyze and suggest code corrections locally using Llama models.</div>
         </div>
-        <BaseToggle
+        <BaseInput
           v-model="enableAutocorrection"
+          type="checkbox"
           @change="handleToggleAutocorrection"
           :disabled="settingsStore.isLoading"
         />
@@ -311,19 +329,25 @@ const formatBytes = (bytes: number) => {
             Based on your system specs (<span class="text-on-surface font-semibold">{{ systemHasGpu ? 'GPU Enabled' : 'CPU Only' }}</span>, <span class="text-on-surface font-semibold">{{ Math.round(totalRamGb) }} GB RAM</span>), we recommend the <strong class="text-primary">{{ getRecommendedModelName() }}</strong> model.
           </div>
         </div>
-        <div class="shrink-0 flex flex-col items-end gap-2">
+        <div class="shrink-0 flex flex-col items-end gap-2 relative">
+          <!-- Click interception overlay when server is active -->
+          <div 
+            v-if="isServerRunning" 
+            @click.stop="triggerBlockedConfigAlert" 
+            class="absolute inset-0 z-10 cursor-pointer"
+          ></div>
           <BaseSelect
             :modelValue="autocorrectionModel"
             @change="handleModelChange"
-            :disabled="settingsStore.isLoading || !!downloadStore.activeDownload"
+            :disabled="settingsStore.isLoading || !!downloadStore.activeDownload || isServerRunning"
             :options="modelOptions"
           />
           
           <button
             v-if="!isModelDownloaded && !isModelDownloading"
             @click="triggerModelDownload"
-            :disabled="settingsStore.isLoading"
-            class="bg-surface hover:bg-surface-container-high border border-outline-variant hover:border-outline text-primary text-[10px] font-semibold font-mono px-2.5 py-1 rounded transition-all cursor-pointer outline-none"
+            :disabled="settingsStore.isLoading || isServerRunning"
+            class="bg-surface hover:bg-surface-container-high border border-outline-variant hover:border-outline text-primary text-[10px] font-semibold font-mono px-2.5 py-1 rounded transition-all cursor-pointer outline-none disabled:opacity-50"
           >
             Download Model
           </button>
@@ -362,21 +386,29 @@ const formatBytes = (bytes: number) => {
 
       <!-- Select: Execution Backend -->
       <hr class="border-outline-variant" />
-      <div class="flex items-center justify-between" :class="{ 'opacity-50 pointer-events-none': !enableAutocorrection }">
+      <div class="flex items-center justify-between">
         <div class="space-y-0.5">
           <div class="text-xs text-on-surface font-semibold">Execution Backend</div>
           <div class="text-[11px] text-on-surface-variant">Select CPU, GPU, or hybrid computation mode.</div>
         </div>
-        <BaseSelect
-          :modelValue="executionBackend"
-          @change="(val) => { executionBackend = String(val); handleSave(); }"
-          :disabled="settingsStore.isLoading || !enableAutocorrection"
-          :options="backendOptions"
-        />
+        <div class="relative">
+          <!-- Click interception overlay when server is active -->
+          <div 
+            v-if="isServerRunning" 
+            @click.stop="triggerBlockedConfigAlert" 
+            class="absolute inset-0 z-10 cursor-pointer"
+          ></div>
+          <BaseSelect
+            :modelValue="executionBackend"
+            @change="(val) => { if (isServerRunning) { triggerBlockedConfigAlert(); } else { executionBackend = String(val); handleSave(); } }"
+            :disabled="settingsStore.isLoading || isServerRunning"
+            :options="backendOptions"
+          />
+        </div>
       </div>
 
       <!-- System Dependencies Health Check -->
-      <div v-if="enableAutocorrection" class="space-y-2 bg-surface-dim border border-outline-variant/60 p-3 rounded-md">
+      <div class="space-y-2 bg-surface-dim border border-outline-variant/60 p-3 rounded-md">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-1.5 text-xs font-semibold text-primary">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
@@ -459,109 +491,79 @@ const formatBytes = (bytes: number) => {
 
       <hr class="border-outline-variant" />
 
-      <!-- Input: CPU Threads -->
-      <div class="flex items-center justify-between" :class="{ 'opacity-50 pointer-events-none': !enableAutocorrection || executionBackend === 'gpu' }">
-        <div class="space-y-0.5 max-w-[60%]">
-          <div class="text-xs text-on-surface font-semibold">CPU Inference Threads</div>
-          <div class="text-[11px] text-on-surface-variant leading-relaxed">
-            <span v-if="executionBackend === 'gpu'" class="text-primary italic">Managed automatically in GPU mode.</span>
-            <span v-else>
-              Number of threads dedicated to local model generation. (Recommended: {{ recommendedCpuThreads }} threads, Max: {{ cpuCoresMax }})
-            </span>
-          </div>
-        </div>
-        <input
-          v-model="cpuThreads"
-          type="number"
-          min="1"
-          :max="cpuCoresMax"
-          @change="handleSave"
-          :disabled="settingsStore.isLoading || !enableAutocorrection || executionBackend === 'gpu'"
-          class="w-24 text-xs bg-surface-dim text-on-surface border border-outline-variant rounded px-2.5 py-1.5 outline-none focus:border-primary transition-colors font-mono"
-        />
-      </div>
-
-      <hr class="border-outline-variant" />
-
-      <!-- Input: GPU Layers Offload -->
-      <div class="flex items-center justify-between" :class="{ 'opacity-50 pointer-events-none': !enableAutocorrection || executionBackend === 'cpu' || executionBackend === 'gpu' }">
-        <div class="space-y-0.5 max-w-[60%]">
-          <div class="text-xs text-on-surface font-semibold">GPU Layers Offload</div>
-          <div class="text-[11px] text-on-surface-variant leading-relaxed flex flex-wrap items-center gap-1.5">
-            <span v-if="executionBackend === 'gpu'" class="text-primary italic">All layers offloaded (managed automatically).</span>
-            <span v-else-if="executionBackend === 'cpu'">Disabled in CPU mode.</span>
-            <span v-else>
-              Number of layers to offload to the GPU (Hybrid mode). (Max layers: {{ maxModelLayers }})
-            </span>
-            <span v-if="systemHasGpu && executionBackend !== 'cpu'" class="bg-primary/20 text-primary border border-primary/30 text-[9px] font-mono font-semibold px-1 rounded uppercase scale-90">
-              GPU Detected
-            </span>
-          </div>
-        </div>
-        <input
-          v-model="gpuLayers"
-          type="number"
-          min="0"
-          :max="maxModelLayers"
-          @change="handleSave"
-          :disabled="settingsStore.isLoading || !enableAutocorrection || executionBackend === 'cpu' || executionBackend === 'gpu'"
-          class="w-24 text-xs bg-surface-dim text-on-surface border border-outline-variant rounded px-2.5 py-1.5 outline-none focus:border-primary transition-colors font-mono"
-        />
-      </div>
-
-      <hr class="border-outline-variant" />
-
       <!-- Select: GPU Target Device Name -->
-      <div class="flex items-center justify-between" :class="{ 'opacity-50 pointer-events-none': !enableAutocorrection || !systemHasGpu || executionBackend === 'cpu' }">
+      <div class="flex items-center justify-between" :class="{ 'opacity-50 pointer-events-none': !systemHasGpu || executionBackend === 'cpu' }">
         <div class="space-y-0.5">
           <div class="text-xs text-on-surface font-semibold">GPU Target Device</div>
           <div class="text-[11px] text-on-surface-variant flex items-center gap-1.5 font-sans">
             Select the GPU device to offload layers to.
           </div>
         </div>
-        <BaseSelect
-          v-model="gpuDeviceName"
-          @change="handleSave"
-          :disabled="settingsStore.isLoading || !enableAutocorrection || !systemHasGpu || executionBackend === 'cpu'"
-          :options="gpuDeviceOptions"
-        />
+        <div class="relative">
+          <div 
+            v-if="isServerRunning" 
+            @click.stop="triggerBlockedConfigAlert" 
+            class="absolute inset-0 z-10 cursor-pointer"
+          ></div>
+          <BaseSelect
+            v-model="gpuDeviceName"
+            @change="handleSave"
+            :disabled="settingsStore.isLoading || !systemHasGpu || executionBackend === 'cpu' || isServerRunning"
+            :options="gpuDeviceOptions"
+          />
+        </div>
       </div>
 
       <hr class="border-outline-variant" />
 
       <!-- Select: Context Size -->
-      <div class="flex items-center justify-between" :class="{ 'opacity-50 pointer-events-none': !enableAutocorrection }">
+      <div class="flex items-center justify-between">
         <div class="space-y-0.5">
           <div class="text-xs text-on-surface font-semibold">Context Size</div>
           <div class="text-[11px] text-on-surface-variant">Max token context window loaded by the model compiler.</div>
         </div>
-        <BaseSelect
-          v-model="contextSize"
-          @change="handleSave"
-          :disabled="settingsStore.isLoading || !enableAutocorrection"
-          :options="contextOptions"
-        />
+        <div class="relative">
+          <div 
+            v-if="isServerRunning" 
+            @click.stop="triggerBlockedConfigAlert" 
+            class="absolute inset-0 z-10 cursor-pointer"
+          ></div>
+          <BaseSelect
+            v-model="contextSize"
+            @change="handleSave"
+            :disabled="settingsStore.isLoading || isServerRunning"
+            :options="contextOptions"
+          />
+        </div>
       </div>
 
       <hr class="border-outline-variant" />
 
       <!-- Input: Autocorrection Port -->
-      <div class="flex items-center justify-between" :class="{ 'opacity-50 pointer-events-none': !enableAutocorrection }">
+      <div class="flex items-center justify-between">
         <div class="space-y-0.5 max-w-[60%]">
           <div class="text-xs text-on-surface font-semibold">Server Network Port</div>
           <div class="text-[11px] text-on-surface-variant leading-relaxed">
             Network port on localhost (127.0.0.1) for the llama-server process. (Default: 18080)
           </div>
         </div>
-        <input
-          v-model="autocorrectionPort"
-          type="number"
-          min="1024"
-          max="65535"
-          @change="handleSave"
-          :disabled="settingsStore.isLoading || !enableAutocorrection"
-          class="w-24 text-xs bg-surface-dim text-on-surface border border-outline-variant rounded px-2.5 py-1.5 outline-none focus:border-primary transition-colors font-mono"
-        />
+        <div class="relative">
+          <div 
+            v-if="isServerRunning" 
+            @click.stop="triggerBlockedConfigAlert" 
+            class="absolute inset-0 z-10 cursor-pointer"
+          ></div>
+          <BaseInput
+            v-model="autocorrectionPort"
+            type="number"
+            :min="1024"
+            :max="65535"
+            @input="() => { if (isServerRunning) { triggerBlockedConfigAlert(); autocorrectionPort = settingsStore.settings.autocorrection_port; } }"
+            @change="() => { if (isServerRunning) { triggerBlockedConfigAlert(); autocorrectionPort = settingsStore.settings.autocorrection_port; } else { handleSave(); } }"
+            :disabled="settingsStore.isLoading || isServerRunning"
+            class="w-24"
+          />
+        </div>
       </div>
     </div>
   </BaseCard>

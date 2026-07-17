@@ -130,6 +130,20 @@ impl LlamaServerManager {
 
         Ok(())
     }
+    pub fn is_running(&self) -> bool {
+        let mut guard = self.child.lock().unwrap();
+        if let Some(ref mut child) = *guard {
+            match child.try_wait() {
+                Ok(None) => true, // Still running
+                _ => {
+                    *guard = None; // Already exited, clean it up
+                    false
+                }
+            }
+        } else {
+            false
+        }
+    }
 }
 
 impl Drop for LlamaServerManager {
@@ -167,16 +181,27 @@ pub async fn start_server_internal(app_handle: &tauri::AppHandle) -> Result<(), 
         return Err(format!("Model file '{}.gguf' not found. Please download it first.", settings.autocorrection_model));
     }
 
-    let (ngl, threads) = match settings.execution_backend.as_str() {
-        "gpu" => (999, 1),
+    // Retrieve hardware features dynamically
+    let mut sys = sysinfo::System::new_all();
+    sys.refresh_memory();
+    let cpu_cores = sys.cpus().len();
+    let threads = std::cmp::max(1, (cpu_cores / 2) as u32); // Use half the cores for CPU execution to preserve UX responsiveness
+
+    // Resolve max layers for selected model dynamically
+    let ngl = match settings.execution_backend.as_str() {
+        "gpu" => 999, // Offload all layers to GPU
         "hybrid" => {
-            let t = if settings.cpu_threads == 0 { 1 } else { settings.cpu_threads };
-            (settings.gpu_layers, t)
+            // Check the model to set appropriate layers
+            match settings.autocorrection_model.as_str() {
+                "qwen-32b" => 64,
+                "qwen-14b" | "qwen-14b-q3" => 40,
+                "qwen-7b" | "qwen-7b-q8" => 28,
+                "qwen-3b" | "deepseek-6.7b" | "llama3-8b" | "llama3.1-8b" => 32,
+                "qwen-1.5b" | "llama3.2-3b" => 28,
+                _ => 32
+            }
         }
-        _ => {
-            let t = if settings.cpu_threads == 0 { 1 } else { settings.cpu_threads };
-            (0, t)
-        }
+        _ => 0 // CPU-only mode
     };
 
     let server_manager = app_handle.state::<LlamaServerManager>();
